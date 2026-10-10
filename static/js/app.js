@@ -308,42 +308,43 @@ function updateZoneFree() {
 
 // ---------- Раскладка текста стикера ----------
 
+// Возвращает строки и признак broken — пришлось ли разрезать слово посередине.
 function wrapText(text, maxWidth, limit) {
   const lines = [];
+  let broken = false;
   const measure = (s) => ctx.measureText(s).width;
-  for (const paragraph of text.split("\n")) {
-    const words = paragraph.split(/\s+/).filter(Boolean);
-    if (!words.length) {
-      lines.push("");
-      if (lines.length >= limit) return lines;
-      continue;
-    }
+  outer: for (const paragraph of text.split("\n")) {
     let line = "";
-    for (const word of words) {
-      const candidate = line ? `${line} ${word}` : word;
-      if (measure(candidate) <= maxWidth) {
-        line = candidate;
-        continue;
+    for (const word of paragraph.split(/\s+/).filter(Boolean)) {
+      // Переносить можно по пробелам и после дефиса: «киберпанк-|будущее».
+      const parts = word.split(/(?<=-)(?=.)/);
+      for (let i = 0; i < parts.length; i++) {
+        const candidate = line + (i === 0 && line ? " " : "") + parts[i];
+        if (measure(candidate) <= maxWidth) {
+          line = candidate;
+          continue;
+        }
+        if (line) {
+          lines.push(line);
+          if (lines.length >= limit) break outer;
+        }
+        // Часть слова длиннее строки — режем по символам.
+        let chars = [...parts[i]];
+        while (chars.length > 1 && measure(chars.join("")) > maxWidth) {
+          broken = true;
+          let cut = 1;
+          while (cut < chars.length && measure(chars.slice(0, cut + 1).join("")) <= maxWidth) cut++;
+          lines.push(chars.slice(0, cut).join(""));
+          if (lines.length >= limit) break outer;
+          chars = chars.slice(cut);
+        }
+        line = chars.join("");
       }
-      if (line) {
-        lines.push(line);
-        if (lines.length >= limit) return lines;
-      }
-      // Слово длиннее строки — режем по символам.
-      let chars = [...word];
-      while (chars.length > 1 && measure(chars.join("")) > maxWidth) {
-        let cut = 1;
-        while (cut < chars.length && measure(chars.slice(0, cut + 1).join("")) <= maxWidth) cut++;
-        lines.push(chars.slice(0, cut).join(""));
-        if (lines.length >= limit) return lines;
-        chars = chars.slice(cut);
-      }
-      line = chars.join("");
     }
     lines.push(line);
-    if (lines.length >= limit) return lines;
+    if (lines.length >= limit) break;
   }
-  return lines;
+  return { lines, broken };
 }
 
 function computeLayout(text) {
@@ -353,24 +354,27 @@ function computeLayout(text) {
     ctx.font = font(size);
     const lineHeight = Math.ceil(size * 1.28);
     const maxLines = Math.max(1, Math.floor(maxHeight / lineHeight));
-    const lines = wrapText(text, maxWidth, maxLines + 1);
-    return { size, lineHeight, maxLines, lines };
+    const { lines, broken } = wrapText(text, maxWidth, maxLines + 1);
+    return { size, lineHeight, maxLines, lines, broken };
   };
-  // Подбираем самый крупный шрифт, при котором текст помещается (бинарный поиск).
-  let lo = MIN_FONT;
-  let hi = MAX_FONT;
-  let best = null;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    const layout = attempt(mid);
-    if (layout.lines.length <= layout.maxLines) {
-      best = layout;
-      lo = mid + 1;
-    } else {
-      hi = mid - 1;
+  // Самый крупный шрифт, при котором текст помещается и слова не рвутся (бинарный поиск).
+  // Если без разрыва слов не обойтись даже мелким шрифтом — разрешаем разрыв.
+  for (const allowBroken of [false, true]) {
+    let lo = MIN_FONT;
+    let hi = MAX_FONT;
+    let best = null;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const layout = attempt(mid);
+      if (layout.lines.length <= layout.maxLines && (allowBroken || !layout.broken)) {
+        best = layout;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
     }
+    if (best) return best;
   }
-  if (best) return best;
   // Не влезает даже минимальным шрифтом — обрезаем многоточием, полный текст откроется по щелчку.
   const layout = attempt(MIN_FONT);
   layout.lines.length = layout.maxLines;

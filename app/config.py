@@ -57,7 +57,9 @@ MAX_USERS_PER_MINUTE = _env_int("MAX_USERS_PER_MINUTE", 30)  # с одного I
 # --- Сессии и синхронизация ---
 SESSION_TTL_HOURS = 24          # «пустые» анонимные пользователи удаляются через сутки
 CLEANUP_INTERVAL_SECONDS = 3600
-POLL_INTERVAL_SECONDS = 5       # как часто клиент опрашивает сервер
+POLL_INTERVAL_SECONDS = 5       # как часто клиент опрашивает сервер, если WebSocket недоступен
+POLL_INTERVAL_WITH_SOCKET_SECONDS = 30  # запасной опрос, пока WebSocket на связи
+MAX_WS_CONNECTIONS = _env_int("MAX_WS_CONNECTIONS", 500)
 
 DATABASE_URL = _database_url()
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-me")

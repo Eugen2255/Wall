@@ -7,7 +7,7 @@ import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Request, Response, WebSocket
 from sqlalchemy import delete, exists, func, or_, select
 from sqlalchemy.orm import Session
 
@@ -18,6 +18,7 @@ from .geometry import Rect, find_free_spot, intersects_any, polyline_intersects_
 from .models import Line, Post, User, Zone, utcnow
 from .profanity import contains_profanity
 from .rate_limit import limiter
+from .realtime import notifier
 from .schemas import (
     ErrorOut, LineCreate, LineOut, PostCreate, PostMove, PostOut, UserOut, WallOut, ZoneCreate, ZoneOut,
 )
@@ -31,8 +32,9 @@ _ERRORS = {code: {"model": ErrorOut} for code in (400, 401, 403, 404, 429)}
 class _WallRevision:
     """Номер версии стены: растёт после каждого изменения.
 
-    По нему строится ETag для GET /posts, и клиент, опрашивающий сервер раз
-    в 5 секунд, получает 304 без тела, пока на стене ничего не поменялось.
+    По нему строится ETag для GET /posts, и клиент, опрашивающий сервер,
+    получает 304 без тела, пока на стене ничего не поменялось. Каждое
+    изменение также рассылается подключённым клиентам через WebSocket.
     """
 
     def __init__(self):
@@ -43,6 +45,8 @@ class _WallRevision:
     def bump(self) -> None:
         with self._lock:
             self.value += 1
+            value = self.value
+        notifier.notify(value)
 
     def etag(self, user_id: uuid.UUID | None) -> str:
         viewer = user_id.hex if user_id else "anon"
@@ -371,12 +375,31 @@ def get_config():
         "free_zone_area": config.FREE_ZONE_AREA,
         "world_limit": config.WORLD_LIMIT,
         "poll_interval_seconds": config.POLL_INTERVAL_SECONDS,
+        "poll_interval_with_socket_seconds": config.POLL_INTERVAL_WITH_SOCKET_SECONDS,
     }
 
 
 @router.get("/health", tags=["service"], summary="Проверка для Render")
 def health():
     return {"status": "ok"}
+
+
+@router.websocket("/ws")
+async def wall_updates(websocket: WebSocket):
+    """Сигналы «стена изменилась»: получив их, клиент сразу перечитывает GET /posts.
+
+    Данных в сокете нет, поэтому авторизация не нужна. Сразу после подключения
+    приходит {"type": "hello", "revision": N}, затем после каждого изменения —
+    {"type": "changed", "revision": N}.
+    """
+    if not await notifier.connect(websocket, revision.value):
+        return
+    try:
+        # Клиент ничего не присылает; просто ждём, пока соединение закроется.
+        while (await websocket.receive())["type"] != "websocket.disconnect":
+            pass
+    finally:
+        notifier.disconnect(websocket)
 
 
 def cleanup_stale_users(db: Session) -> int:

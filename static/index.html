@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>The Wall — общая бесконечная стена</title>
+  <meta name="description" content="Одна общая бесконечная стена для идей: клейте стикеры, двигайте их, рисуйте связи и занимайте приватные участки.">
+  <meta name="theme-color" content="#efebe3">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='5' width='20' height='20' rx='2' fill='%23ffd84d'/%3E%3Crect x='10' y='10' width='19' height='19' rx='2' fill='%23ff5a36'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <canvas id="wall" aria-label="Общая стена с постами"></canvas>
+
+  <header class="topbar">
+    <div class="brand" title="The Wall">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">The Wall</span>
+    </div>
+    <div class="top-actions">
+      <div class="status" title="Координаты центра экрана и масштаб">
+        <span id="net-dot" class="net-dot" title="Связь с сервером"></span>
+        <span id="coords">0, 0 · 100%</span>
+      </div>
+      <button id="home-btn" class="icon-btn" type="button" title="К началу стены (0)" aria-label="К началу стены">⌂</button>
+      <button id="share-btn" class="icon-btn" type="button" title="Скопировать ссылку на это место" aria-label="Скопировать ссылку на это место">🔗</button>
+      <button id="help-btn" class="icon-btn" type="button" title="Как пользоваться" aria-label="Как пользоваться">?</button>
+    </div>
+  </header>
+
+  <nav class="toolbar" role="toolbar" aria-label="Режимы работы">
+    <button class="tool active" type="button" data-mode="move" title="Двигать стикеры и стену (V)">
+      <span class="tool-icon" aria-hidden="true">✋</span><span class="tool-label">Двигать</span>
+    </button>
+    <button class="tool" type="button" data-mode="draw" title="Рисовать (D)">
+      <span class="tool-icon" aria-hidden="true">✏️</span><span class="tool-label">Рисовать</span>
+    </button>
+    <button class="tool" type="button" data-mode="zone" title="Создать приватную зону (Z)">
+      <span class="tool-icon" aria-hidden="true">🔒</span><span class="tool-label">Создать зону</span>
+    </button>
+  </nav>
+
+  <section id="draw-panel" class="panel" hidden aria-label="Настройки рисования">
+    <div id="swatches" class="swatches" role="radiogroup" aria-label="Цвет"></div>
+    <label class="color-custom" title="Свой цвет">
+      <input id="color-input" type="color" value="#000000" aria-label="Свой цвет">
+    </label>
+    <label class="thickness">
+      <span>Толщина</span>
+      <input id="thickness-input" type="range" min="1" max="20" value="2">
+      <span id="thickness-value" class="thickness-value">2</span>
+    </label>
+    <button id="undo-btn" class="btn" type="button" title="Удалить мою последнюю линию (Ctrl+Z)">↶ Отменить</button>
+    <button id="draw-done" class="btn btn-primary" type="button">Готово</button>
+  </section>
+
+  <section id="zone-panel" class="panel" hidden aria-label="Приватные зоны">
+    <span class="panel-text">Выделите прямоугольник на стене. Свободно: <b id="zone-free">100%</b></span>
+    <button id="zone-done" class="btn btn-primary" type="button">Готово</button>
+  </section>
+
+  <button id="add-post-btn" class="fab" type="button" title="Добавить пост (N)">
+    <span aria-hidden="true">＋</span><span class="fab-label">Добавить пост</span>
+  </button>
+
+  <div id="empty-state" class="empty-state" hidden>
+    <p class="empty-title">Стена пуста. Приклей первую идею!</p>
+    <p class="empty-hint">Нажмите «Добавить пост» или дважды щёлкните по стене</p>
+  </div>
+
+  <div id="loading" class="loading" role="status">
+    <div class="spinner" aria-hidden="true"></div>
+    <p id="loading-text">Загружаем стену…</p>
+    <p id="loading-hint" class="muted" hidden>Сервер просыпается после простоя — это может занять до минуты.</p>
+  </div>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <dialog id="post-dialog" class="dialog">
+    <form id="post-form" method="dialog">
+      <h2>Новый пост</h2>
+      <textarea id="post-text" rows="6" maxlength="500" placeholder="Напишите идею…" required></textarea>
+      <div class="dialog-row">
+        <span id="post-counter" class="muted">0 / 500</span>
+        <span class="muted hint">Ctrl+Enter — приклеить</span>
+      </div>
+      <div class="dialog-actions">
+        <button id="post-cancel" class="btn" type="button">Отмена</button>
+        <button id="post-submit" class="btn btn-primary" type="submit">Приклеить</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="view-dialog" class="dialog">
+    <p id="view-meta" class="muted"></p>
+    <div id="view-text" class="view-text"></div>
+    <div class="dialog-actions">
+      <button id="view-delete" class="btn btn-danger" type="button" hidden>Удалить</button>
+      <button id="view-close" class="btn btn-primary" type="button">Закрыть</button>
+    </div>
+  </dialog>
+
+  <dialog id="help-dialog" class="dialog dialog-wide">
+    <h2>Как пользоваться стеной</h2>
+    <ul class="help-list">
+      <li><b>＋ Добавить пост</b> (N) — напишите текст до 500 символов и нажмите «Приклеить». Стикер появится в центре экрана. Можно и дважды щёлкнуть по пустому месту стены.</li>
+      <li><b>✋ Двигать</b> (V) — перетаскивайте стикеры мышью. Тяните пустое место, чтобы перемещаться по стене, колесо мыши — масштаб. Щелчок по стикеру открывает его полностью; свой пост там же можно удалить.</li>
+      <li><b>✏️ Рисовать</b> (D) — выберите цвет и толщину и рисуйте стрелки и связи. «Отменить» (Ctrl+Z) удаляет вашу последнюю линию.</li>
+      <li><b>🔒 Создать зону</b> (Z) — выделите прямоугольник, и он станет вашим приватным участком: другие не смогут класть туда посты, двигать их и рисовать. Бесплатно доступно 1 000 000 px² (например, 1000×1000). Удалить свою зону — крестик в её углу в этом режиме.</li>
+      <li>Перемещаться по стене можно в любом режиме: правая кнопка мыши или пробел + перетаскивание. На телефоне — двумя пальцами.</li>
+      <li>Изменения других людей появляются сами, примерно раз в 5 секунд. 🔗 копирует ссылку на текущее место стены.</li>
+    </ul>
+    <div class="dialog-actions">
+      <button id="help-close" class="btn btn-primary" type="button">Понятно</button>
+    </div>
+  </dialog>
+
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

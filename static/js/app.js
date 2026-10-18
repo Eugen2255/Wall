@@ -73,7 +73,6 @@ const cfg = {
   max_zones_per_user: 10,
   free_zone_area: 1_000_000,
   poll_interval_seconds: 5,
-  poll_interval_with_socket_seconds: 30,
 };
 
 const state = {
@@ -94,7 +93,6 @@ const state = {
   hoverPostId: null,
   viewPostId: null,
   flash: null,
-  online: true,
 };
 
 const camera = { x: 0, y: 0, scale: 1 };  // x, y — мировые координаты левого верхнего угла экрана
@@ -108,11 +106,6 @@ let dpr = 1;
 let drawQueued = false;
 let pollTimer = null;
 let polling = false;
-let pollAgain = false;
-let socket = null;
-let socketOpen = false;
-let reconnectTimer = null;
-let reconnectDelay = 1000;
 let hashTimer = null;
 
 // ---------- Утилиты ----------
@@ -1175,11 +1168,8 @@ function applyConfigToUi() {
 }
 
 function setOnline(online) {
-  state.online = online;
   ui.netDot.classList.toggle("offline", !online);
-  if (!online) ui.netDot.title = "Нет связи с сервером";
-  else if (socketOpen) ui.netDot.title = "Связь есть: изменения приходят сразу";
-  else ui.netDot.title = `Связь есть: обновление раз в ${cfg.poll_interval_seconds} с`;
+  ui.netDot.title = online ? "Связь с сервером есть" : "Нет связи с сервером";
 }
 
 async function copyLink() {
@@ -1300,29 +1290,11 @@ function bindUi() {
 
 // ---------- Синхронизация ----------
 
-// Данные стены всегда приходят из GET /posts (ETag экономит трафик). WebSocket лишь
-// сообщает «стена изменилась», чтобы перечитать её сразу. Пока сокет на связи,
-// запасной опрос редкий; без сокета — раз в 5 секунд, как в ТЗ.
-function pollInterval() {
-  const seconds = socketOpen ? cfg.poll_interval_with_socket_seconds : cfg.poll_interval_seconds;
-  return seconds * 1000;
-}
-
-function restartPollTimer() {
-  if (polling) return;  // таймер заведёт текущий опрос, когда закончится
-  clearTimeout(pollTimer);
-  pollTimer = setTimeout(poll, pollInterval());
-}
-
+// Без WebSocket: опрашиваем сервер раз в несколько секунд, ETag экономит трафик.
 async function poll() {
   clearTimeout(pollTimer);
   pollTimer = null;
-  if (document.hidden) return;
-  if (polling) {
-    // Изменение пришло, пока идёт запрос: его ответ может быть уже устаревшим.
-    pollAgain = true;
-    return;
-  }
+  if (polling || document.hidden) return;
   polling = true;
   try {
     const result = await api.wall(state.etag);
@@ -1335,49 +1307,8 @@ async function poll() {
     setOnline(false);
   } finally {
     polling = false;
+    if (!document.hidden) pollTimer = setTimeout(poll, cfg.poll_interval_seconds * 1000);
   }
-  if (pollAgain) {
-    pollAgain = false;
-    poll();
-  } else if (!document.hidden) {
-    pollTimer = setTimeout(poll, pollInterval());
-  }
-}
-
-function connectSocket() {
-  if (!("WebSocket" in window)) return;
-  clearTimeout(reconnectTimer);
-  let ws;
-  try {
-    ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
-  } catch {
-    return;  // сокеты недоступны — остаёмся на опросе
-  }
-  socket = ws;
-  ws.addEventListener("open", () => {
-    socketOpen = true;
-    reconnectDelay = 1000;
-    setOnline(true);
-    poll();  // догоняем изменения, пропущенные, пока сокета не было
-  });
-  ws.addEventListener("message", (event) => {
-    let message = null;
-    try {
-      message = JSON.parse(event.data);
-    } catch {
-      return;
-    }
-    if (message.type === "changed") poll();
-  });
-  ws.addEventListener("close", () => {
-    if (socket !== ws) return;
-    socket = null;
-    socketOpen = false;
-    setOnline(state.online);  // обновляем подсказку у индикатора связи
-    restartPollTimer();  // пока сокета нет, опрашиваем чаще
-    reconnectTimer = setTimeout(connectSocket, reconnectDelay);
-    reconnectDelay = Math.min(reconnectDelay * 2, 30000);
-  });
 }
 
 function jumpToContentIfViewEmpty() {
@@ -1423,8 +1354,7 @@ async function init() {
   applyConfigToUi();
   if (!fromHash) jumpToContentIfViewEmpty();
   setOnline(true);
-  pollTimer = setTimeout(poll, pollInterval());
-  connectSocket();
+  pollTimer = setTimeout(poll, cfg.poll_interval_seconds * 1000);
 }
 
 init();

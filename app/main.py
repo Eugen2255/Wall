@@ -20,7 +20,6 @@ from .api import cleanup_stale_users, router
 from .database import Base, SessionLocal, engine
 from .errors import install_error_handlers
 from .rate_limit import limiter
-from .realtime import notifier
 
 # В реестре Windows .js бывает прописан как text/plain — тогда браузер не загрузит ES-модули.
 mimetypes.add_type("application/javascript", ".js")
@@ -56,10 +55,8 @@ async def lifespan(_app: FastAPI):
     if config.ON_RENDER and config.SECRET_KEY == "dev-secret-change-me":
         logger.warning("SECRET_KEY не задан: используйте случайное значение в настройках Render")
     Base.metadata.create_all(engine)
-    notifier.attach(asyncio.get_running_loop())
     task = asyncio.create_task(_housekeeping())
     yield
-    notifier.detach()
     task.cancel()
     with suppress(asyncio.CancelledError):
         await task
